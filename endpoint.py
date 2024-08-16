@@ -5,11 +5,20 @@ __author__ = "bitsofinfo"
 from twisted.web import server, resource
 from twisted.internet import reactor, endpoints
 from ratelimit import limits, RateLimitException
+from datetime import datetime, timedelta
 import time
 import threading
 import logging
 import json
 import argparse
+
+max_calls= 1
+period_seconds = 5
+retry_in_seconds = 30
+limit_hit_response_code = 429
+retry_format_datetime = False;
+# Default: https://tools.ietf.org/html/rfc7231#section-7.1.3
+retry_after_header_name = "x-retry-after"
 
 # The MockRateLimitingEndpoint impl
 class MockRateLimitingEndpoint(resource.Resource):
@@ -19,14 +28,6 @@ class MockRateLimitingEndpoint(resource.Resource):
     total_limit_hits = 0
 
     ratelimitedfunc = None
-
-    max_calls= 1
-    period_seconds = 10
-    retry_in_seconds = 30
-    limit_hit_response_code = 429
-
-    # Default: https://tools.ietf.org/html/rfc7231#section-7.1.3
-    retry_after_header_name = "Retry-After"
 
     def render_GET(self, request):
         self.total_reqs += 1
@@ -59,9 +60,14 @@ class MockRateLimitingEndpoint(resource.Resource):
             toReturn['total_limit_hits'] = self.total_limit_hits
 
         except RateLimitException as e:
+            if retry_format_datetime:
+                dt = datetime.now()
+                td = timedelta(seconds=retry_in_seconds)
+                retry_after_datetime = dt + td
+
             self.total_limit_hits += 1
             request.setResponseCode(curr_limit_hit_response_code)
-            request.setHeader(curr_retry_header_name, self.retry_in_seconds)
+            request.setHeader(curr_retry_header_name, str(retry_after_datetime if retry_format_datetime else retry_in_seconds))
             toReturn['status_code'] = curr_limit_hit_response_code
             toReturn['msg'] = "%d: rate limit hit max_calls:%d period_seconds:%d" % (curr_limit_hit_response_code,self.max_calls,self.period_seconds)
             toReturn['retry_in_seconds'] = self.retry_in_seconds
@@ -90,11 +96,11 @@ class MockRateLimitingEndpoint(resource.Resource):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-p', '--listen-port', dest='listen_port', help="Port to listen on, default 8081", type=int, default=8081)
-    parser.add_argument('-m', '--max-calls', dest='max_calls', help="Max calls for the rate limiter over the specified --period-seconds, Default 1", type=int, default=1)
-    parser.add_argument('-P', '--period-seconds', dest='period_seconds', help="Period in seconds that the --max-calls will apply for, Default 10", type=int, default=10)
-    parser.add_argument('-r', '--retry-in-seconds', dest='retry_in_seconds', help="Value for the --retry-after-header-name argument which is returned when the rate limit has been reached, default 10", type=int, default=10)
+    parser.add_argument('-m', '--max-calls', dest='max_calls', help="Max calls for the rate limiter over the specified --period-seconds, Default 1", type=int, default=max_calls)
+    parser.add_argument('-P', '--period-seconds', dest='period_seconds', help="Period in seconds that the --max-calls will apply for, Default 10", type=int, default=period_seconds)
+    parser.add_argument('-r', '--retry-in-seconds', dest='retry_in_seconds', help="Value for the --retry-after-header-name argument which is returned when the rate limit has been reached, default 10", type=int, default=retry_in_seconds)
     parser.add_argument('-c', '--limit-hit-response-code', dest='limit_hit_response_code', help="Default 429", type=int, default=429)
-    parser.add_argument('-a', '--retry-after-header-name', dest='retry_after_header_name', help="Default Retry-After", default="Retry-After")
+    parser.add_argument('-a', '--retry-after-header-name', dest='retry_after_header_name', help="Default Retry-After", default=retry_after_header_name)
 
     # set vars
     args = parser.parse_args()

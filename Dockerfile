@@ -1,4 +1,4 @@
-FROM python:3.6.5-alpine
+FROM python:3.9.19-bullseye
 
 # install the result handler and reactor module /usr/local/bin
 RUN apk update ; \
